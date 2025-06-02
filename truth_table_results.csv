@@ -1,0 +1,5 @@
+Hold_Q0_stays_Q0,1
+Set_Q0_to_Q1,0
+Hold_Q1_stays_Q1,1
+Reset_Q1_to_Q0,0
+Invalid_input_behavior,0
