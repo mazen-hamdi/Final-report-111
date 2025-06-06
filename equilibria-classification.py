@@ -543,9 +543,11 @@ def run_all(args):
         bistability_vs_k()
         
     if args.cont:
-        logging.info("Attempting PyCont continuation (if PyDSTool is available)...")
-        # continuation() # Call is commented out as per user focus
-        logging.info("PyCont continuation part is currently not run by default.")
+        logging.info("Attempting PyCont continuation (requires PyDSTool)...")
+        if HAVE_PYDSTOOL:
+            continuation()
+        else:
+            logging.warning("PyDSTool not installed; skipping continuation step.")
 
     if args.sweep:
         logging.info("Running Monte Carlo sweep for heatmaps...")

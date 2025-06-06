@@ -1,1 +1,21 @@
 # Final-report-111
+
+This repository contains a Python pipeline for analyzing a two-cell bioelectric SR-latch model. The workflow includes phase-plane diagrams, Monte-Carlo sweeps and a truth table verification. Optionally, it can perform equilibrium continuation with **PyDSTool** and its `PyCont` module.
+
+## Requirements
+
+- Python 3 with `numpy`, `scipy`, `matplotlib`, `pandas`, `tqdm`.
+- For the continuation feature (`--cont` flag), `PyDSTool` must be installed. If it is absent, the script will skip that step and issue a warning.
+
+## Usage
+
+Run the script with the desired command-line options:
+
+```bash
+python3 equilibria-classification.py --phase    # phase planes and stability plots
+python3 equilibria-classification.py --sweep    # Monte-Carlo parameter sweep
+python3 equilibria-classification.py --truth    # deterministic truth table check
+python3 equilibria-classification.py --cont     # PyCont equilibrium continuation
+```
+
+Use `--all` to run the default analysis set (`phase`, `sweep`, `truth`). All outputs are saved in the `results/` directory.
