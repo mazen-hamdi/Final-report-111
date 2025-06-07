@@ -14,7 +14,7 @@ Author: Mohamed Mazen Hamdi / Rohan Vasudev
 from __future__ import annotations
 import math, sys, warnings, itertools, multiprocessing as mp
 from pathlib import Path
-import argparse, logging
+import argparse, logging, os
 
 import numpy as np
 import pandas as pd
@@ -139,8 +139,12 @@ def euler_maruyama(k: float,
                    sigma: float,
                    v0: np.ndarray | None = None,
                    T: float = T_TOTAL,
-                   dt: float = DT) -> np.ndarray:
+                   dt: float = DT,
+                   rng: np.random.Generator | None = None) -> np.ndarray:
     """Integrate SDE from v0 (default (0,0)) and return final state."""
+    if rng is None:
+        rng = globals().get("rng", np.random.default_rng())
+
     v   = np.array(v0) if v0 is not None else np.zeros(2)
     N   = int(T/dt)
     sdt = math.sqrt(dt)
@@ -321,7 +325,9 @@ def continuation():
     plt.close()
 
 # ───────────────────────────────────────────── Monte‑Carlo switch probability —
-def switch_trial(k: float, sigma: float, amp: float, switch_threshold: float = 0.1) -> int:
+def switch_trial(k: float, sigma: float, amp: float,
+                 rng: np.random.Generator | None = None,
+                 switch_threshold: float = 0.1) -> int:
     """Single trial → 1 if Set pulse (V1 high, V2 low) succeeds, 0 otherwise."""
     # (i) Prepare initial state, aiming for Q=0 (v1 low, v2 high).
     # For robustness, start near the anti-symmetric attractor (-va, va) if k allows, or (0,0)
@@ -340,7 +346,8 @@ def switch_trial(k: float, sigma: float, amp: float, switch_threshold: float = 0
     # IR_set_pulse = lambda t: 0.0 # Alternative: only pulse V1
 
     # Simulate for a total time T_TOTAL, which includes the pulse and settling time
-    v_final = euler_maruyama(k, IS_set_pulse, IR_set_pulse, sigma, v0=v_start_for_set_pulse, T=T_TOTAL)
+    v_final = euler_maruyama(k, IS_set_pulse, IR_set_pulse, sigma,
+                             v0=v_start_for_set_pulse, T=T_TOTAL, rng=rng)
 
     # Success if V1 ended high and V2 ended low
     switched_to_q1 = (v_final[0] > switch_threshold and v_final[1] < -switch_threshold)
@@ -352,11 +359,15 @@ def mc_worker(arg_tuple):
     # If it takes one tuple, then unpack. Let's assume it's a tuple.
     if isinstance(arg_tuple, tuple) and len(arg_tuple) == 3:
         k, sigma, amp = arg_tuple
-    else: # Fallback or error, depends on how pool.imap_unordered passes it
+    else:  # Fallback or error
         logging.error(f"mc_worker received unexpected arg format: {arg_tuple}")
-        return 0.0 # Or some error indicator
+        return 0.0
 
-    hits = sum(switch_trial(k, sigma, amp) for _ in range(TRIALS_PER_TASK))
+    seed = int.from_bytes(os.urandom(8), "little") ^ hash((k, sigma, amp))
+    local_rng = np.random.default_rng(seed)
+
+    hits = sum(switch_trial(k, sigma, amp, rng=local_rng)
+               for _ in range(TRIALS_PER_TASK))
     return k, sigma, amp, hits / TRIALS_PER_TASK
     
 # ──────────────────────────────────────────────── grid sweep / CSV / 2D Heatmaps —
