@@ -1,5 +1,7 @@
 # Final-report-111
 
+Author: Mohamed Mazen Hamdi / Rohan Vasudev
+
 This repository contains a Python pipeline for analyzing a two-cell bioelectric SR-latch model. The workflow includes phase-plane diagrams, Monte-Carlo sweeps and a truth table verification. Optionally, it can perform equilibrium continuation with **PyDSTool** and its `PyCont` module.
 
 ## Requirements
