@@ -19,6 +19,7 @@ import argparse, logging
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib import animation
 from scipy import optimize, linalg
 from tqdm import tqdm
 
@@ -140,19 +141,31 @@ def euler_maruyama(k: float,
                    v0: np.ndarray | None = None,
                    T: float = T_TOTAL,
                    dt: float = DT,
-                   rng: np.random.Generator | None = None) -> np.ndarray:
-    """Integrate SDE from v0 (default (0,0)) and return final state."""
+                  rng: np.random.Generator | None = None,
+                   return_path: bool = False) -> np.ndarray:
+    """Integrate SDE from v0 (default (0,0)).
+
+    By default only the final state is returned.  If ``return_path`` is
+    ``True`` the full trajectory array of shape (N+1, 2) is returned.
+    """
     if rng is None:
             rng = globals().get("rng", np.random.default_rng())
     v   = np.array(v0) if v0 is not None else np.zeros(2)
     N   = int(T/dt)
     sdt = math.sqrt(dt)
     t   = 0.0
+    if return_path:
+        path = np.zeros((N+1, 2))
+        path[0] = v
+        idx = 1
     for _ in range(N):
         v += rhs(v, k, IS_fun(t), IR_fun(t)) * dt \
              + sigma * sdt * rng.normal(size=2)
         t += dt
-    return v
+    if return_path:
+            path[idx] = v
+            idx += 1
+    return path if return_path else v
 
 # ──────────────────────────────────────────────── pulse + prep‑state utilities —
 def rectangular_pulse(t0: float, t1: float, amp: float):
@@ -243,6 +256,65 @@ def plot_phase(k: float):
     plt.gca().set_aspect('equal', adjustable='box')
     plt.savefig(OUT_DIR / f'phaseplane_k{k:.3f}.png')
     plt.close()
+
+
+
+
+def animate_trial(k: float, sigma: float, amp: float,
+                  save_path: Path | None = None,
+                  rng: np.random.Generator | None = None) -> None:
+    """Animate a single stochastic switching trial on the phase plane."""
+    if rng is None:
+        rng = globals().get("rng", np.random.default_rng())
+
+    # Prepare initial state near Q=0 then apply Set pulse
+    v_start = prepare_reset_state(k, amp)
+    IS_set = rectangular_pulse(0.0, 2.0, amp)
+    IR_set = rectangular_pulse(0.0, 2.0, -amp if amp > 0 else 0.0)
+
+    path = euler_maruyama(k, IS_set, IR_set, sigma,
+                          v0=v_start, rng=rng, return_path=True)
+
+    U_coords = np.linspace(-2.5, 2.5, GRID_N)
+    V_coords = np.linspace(-2.5, 2.5, GRID_N)
+    Ug, Vg = np.meshgrid(U_coords, V_coords)
+    dU, dV = rhs(np.array([Ug, Vg]), k, 0.0, 0.0)
+
+    fig, ax = plt.subplots(figsize=(8, 7))
+    ax.streamplot(Ug, Vg, dU, dV, color='0.7', density=1.2, arrowsize=0.9)
+
+    x_null = np.linspace(-2.5, 2.5, 400)
+    if abs(k) > 1e-6:
+        ax.plot(x_null, (x_null - x_null**3) / k, 'r--', lw=1)
+        ax.plot((x_null - x_null**3) / k, x_null, 'b--', lw=1)
+
+    point, = ax.plot([], [], 'ko', ms=5)
+
+    ax.set_xlim(-2.5, 2.5)
+    ax.set_ylim(-2.5, 2.5)
+    ax.set_xlabel('$V_1$')
+    ax.set_ylabel('$V_2$')
+    ax.set_title(f'Stochastic trajectory (k={k:.2f}, sigma={sigma}, amp={amp})')
+    ax.grid(True, lw=0.3, alpha=0.4)
+    ax.set_aspect('equal', adjustable='box')
+
+    def init():
+        point.set_data([], [])
+        return point,
+
+    def update(frame):
+        point.set_data(path[frame, 0], path[frame, 1])
+        return point,
+
+    ani = animation.FuncAnimation(fig, update, frames=len(path),
+                                  init_func=init, blit=True, interval=40)
+
+    if save_path is not None:
+        ani.save(save_path, writer ='pillow', fps=25)
+        plt.close(fig)
+    else:
+        plt.show()
+
 
 # ───────────────────────────────────────────────────── PyCont continuation plot —
 def antisym_eq(k: float) -> tuple[float,float]:
