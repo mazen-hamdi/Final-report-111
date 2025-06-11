@@ -237,7 +237,7 @@ def prepare_reset_state(k: float, amp: float, sigma: float = 0.0) -> np.ndarray:
 
 
 # ───────────────────────────────────────────────────────── phase‑plane plotting —
-def plot_phase(k: float):
+def plot_phase_ideal(k: float):
     U_coords = np.linspace(-2.5, 2.5, GRID_N)
     V_coords = np.linspace(-2.5, 2.5, GRID_N)
     Ug, Vg = np.meshgrid(U_coords, V_coords)
@@ -306,7 +306,78 @@ def plot_phase(k: float):
     plt.close()
 
 
+def plot_phase(k: float):
+    """
+    Plots the phase plane, finds equilibria numerically, classifies them,
+    and plots them on the diagram.
+    """
+    U_coords = np.linspace(-2.5, 2.5, GRID_N)
+    V_coords = np.linspace(-2.5, 2.5, GRID_N)
+    Ug, Vg = np.meshgrid(U_coords, V_coords)
+    
+    dU, dV = rhs(np.array([Ug, Vg]), k, 0.0, 0.0)
 
+    fig, ax = plt.subplots(figsize=(8,7))
+    ax.streamplot(Ug, Vg, dU, dV, color='0.7', density=1.2, arrowsize=0.9)
+
+    # --- Nullclines (no change here) ---
+    x_null = np.linspace(-2.5, 2.5, 400)
+    if abs(k) > 1e-6:
+        ax.plot(x_null, (x_null - x_null**3) / k, 'r--', lw=1.5, label='$dV_1/dt=0$')
+        ax.plot((x_null - x_null**3) / k, x_null, 'b--', lw=1.5, label='$dV_2/dt=0$')
+    else:
+        # Handle k=0 case
+        ... 
+
+    # --- THIS IS THE NEW, ROBUST METHOD ---
+    logging.info(f"Numerically searching for equilibria for k={k:.3f}...")
+    equilibria_coords = find_equilibria_numerically(k, n_guesses=100)
+    
+    type_map = {
+        "Attractor": {'marker': 'o', 'color': 'green', 'size': 80, 'label': 'Attractor'},
+        "Saddle": {'marker': 'x', 'color': 'red', 'size': 80, 'label': 'Saddle'},
+        "Repeller": {'marker': '^', 'color': 'blue', 'size': 80, 'label': 'Repeller'},
+        "Non-Hyperbolic": {'marker': 'D', 'color': 'purple', 'size': 70, 'label': 'Non-Hyperbolic'},
+        "Unknown": {'marker': 's', 'color': 'gray', 'size': 60, 'label': 'Unknown'}  
+    }
+    
+    plotted_labels = set()
+    for v_eq in equilibria_coords:
+        # For each found equilibrium, classify it now
+        J = jac(v_eq, k)
+        eig_vals = np.linalg.eigvals(J)
+        real_parts = np.real(eig_vals)
+        
+        # Classification logic based on eigenvalues
+        eq_type = "Unknown"
+        if np.any(np.abs(real_parts) < 1e-6):
+            eq_type = "Non-Hyperbolic"
+        elif np.all(real_parts < 0):
+            eq_type = "Attractor"
+        elif np.all(real_parts > 0):
+            eq_type = "Repeller"
+        elif real_parts[0] * real_parts[1] < 0:
+            eq_type = "Saddle"
+
+        # Plotting logic
+        style = type_map.get(eq_type, type_map["Unknown"])
+        label = style['label'] if style['label'] not in plotted_labels else None
+        if label: plotted_labels.add(style['label'])
+        
+        ax.scatter(v_eq[0], v_eq[1], 
+                   marker=style['marker'], color=style['color'], 
+                   s=style['size'], label=label,
+                   edgecolors='black', zorder=5)
+
+    ax.set_xlabel('$V_1$'); ax.set_ylabel('$V_2$')
+    ax.set_title(f'Phase plane (k={k:.3f}) with Numerically Found Equilibria')
+    ax.legend(loc='upper right', frameon=True, fontsize='small')
+    ax.set_xlim(-2.5, 2.5); ax.set_ylim(-2.5, 2.5); ax.grid(True, lw=0.3, alpha=0.4)
+    ax.axhline(0, color='black', lw=0.5, alpha=0.5)
+    ax.axvline(0, color='black', lw=0.5, alpha=0.5)
+    ax.set_aspect('equal', adjustable='box')
+    plt.savefig(OUT_DIR / f'phaseplane_numerical_k{k:.3f}.png')
+    plt.close(fig)
 
 def animate_trial(k: float, sigma: float, amp: float,
                   save_path: Path | None = None,
@@ -675,6 +746,7 @@ def run_all(args):
         k_values_for_phase_plots = sorted(list(set([0.25, 0.75, 1.0, 1.25] + [K_RANGE[0], K_RANGE[len(K_RANGE)//2], K_RANGE[-1]])))
         for k_val in tqdm(k_values_for_phase_plots, desc="Phase Planes"):
             plot_phase(k_val)
+            plot_phase_ideal(k_val)  # Ideal case for comparison
         logging.info("Generating bistability vs k plot...")
         bistability_vs_k()
     if args.bifurcation:
