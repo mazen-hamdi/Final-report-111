@@ -743,7 +743,7 @@ def truth_table():
 def run_all(args):
     if args.phase:
         logging.info("Generating phase plane diagrams...")
-        k_values_for_phase_plots = sorted(list(set([0.25, 0.75, 1.0, 1.25] + [K_RANGE[0], K_RANGE[len(K_RANGE)//2], K_RANGE[-1]])))
+        k_values_for_phase_plots = sorted(list(set([0.1,0.25,0.5, 0.75,1.05, 1.0, 1.25, 1.5] + [K_RANGE[0], K_RANGE[len(K_RANGE)//2], K_RANGE[-1]])))
         for k_val in tqdm(k_values_for_phase_plots, desc="Phase Planes"):
             plot_phase(k_val)
             plot_phase_ideal(k_val)  # Ideal case for comparison
