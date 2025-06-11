@@ -157,14 +157,14 @@ def euler_maruyama(k: float,
     if return_path:
         path = np.zeros((N+1, 2))
         path[0] = v
-        idx = 1
-    for _ in range(N):
+        
+    for i in range(N):
         v += rhs(v, k, IS_fun(t), IR_fun(t)) * dt \
              + sigma * sdt * rng.normal(size=2)
         t += dt
-    if return_path:
-            path[idx] = v
-            idx += 1
+        if return_path:
+            path[i+1] = v
+           
     return path if return_path else v
 
 # ──────────────────────────────────────────────── pulse + prep‑state utilities —
@@ -303,7 +303,7 @@ def animate_trial(k: float, sigma: float, amp: float,
         return point,
 
     def update(frame):
-        point.set_data(path[frame, 0], path[frame, 1])
+        point.set_data([path[frame, 0]], [path[frame, 1]])
         return point,
 
     ani = animation.FuncAnimation(fig, update, frames=len(path),
