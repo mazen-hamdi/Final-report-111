@@ -330,12 +330,9 @@ def switch_trial(k: float, sigma: float, amp: float,rng: np.random.Generator | N
     # For robustness, start near the anti-symmetric attractor (-va, va) if k allows, or (0,0)
     v_initial_target_q0 = np.array([-np.sqrt(max(0,1+k)), np.sqrt(max(0,1+k))]) if (1+k)>0.01 else np.array([0.0,0.0])
     
-    # No explicit reset pulse, start near a Q=0 like state or allow system to settle there if no pulse.
-    # For a "Set" pulse test, we assume the system is initially in a state *not* Q=1.
-    # Let's start from a slightly perturbed origin or a Q=0 attractor.
-    # The original prepare_reset_state used a pulse. Here, let's simplify for testing "Set".
-    # v_start_for_set_pulse = v_initial_target_q0 + rng.normal(size=2) * 0.05 # Small noise
-    v_start_for_set_pulse = np.array([0.0,0.0]) # Start from origin for simplicity of "Set" test
+     # Prepare the state using the same routine as the reset logic so the latch
+    # begins in a Q=0 configuration.
+    v_start_for_set_pulse = prepare_reset_state(k, amp)
 
     # (ii) apply Set pulse (10–12 s) to drive V1 high, V2 low
     IS_set_pulse = rectangular_pulse(t0=0.0, t1=2.0, amp=amp)  # Shorter pulse for test
