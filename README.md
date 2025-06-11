@@ -31,6 +31,7 @@ python3 equilibria-classification.py --phase    # phase planes and stability plo
 python3 equilibria-classification.py --sweep    # Monte-Carlo parameter sweep
 python3 equilibria-classification.py --truth    # deterministic truth table check
 python3 equilibria-classification.py --cont     # PyCont equilibrium continuation
+python3 equilibria-classification.py --bifurcation # numerical bifurcation diagram
 ```
 
 Use `--all` to run the default analysis set (`phase`, `sweep`, `truth`). All outputs are saved in the `results/` directory.

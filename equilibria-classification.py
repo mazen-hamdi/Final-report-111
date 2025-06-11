@@ -135,6 +135,54 @@ def get_all_equilibria_and_classify(k: float, tol: float = 1e-9) -> list[dict]:
     return unique_equilibria
 
 # ─────────────────────────────────────────────── Euler–Maruyama SDE integrator —
+# --------------------------- numerical equilibrium finder --------------------
+def find_equilibria_numerically(k: float, n_guesses: int = 100,
+                                search_bounds=(-2.5, 2.5), tol: float = 1e-5) -> list[np.ndarray]:
+    """Return unique equilibrium points found via numerical root finding."""
+    func = lambda v: rhs(v, k, 0.0, 0.0)
+    rng_local = np.random.default_rng()
+    roots = []
+    for _ in range(n_guesses):
+        guess = rng_local.uniform(search_bounds[0], search_bounds[1], size=2)
+        try:
+            root, info, ier, _ = optimize.fsolve(func, guess, full_output=True)
+            if ier == 1:
+                roots.append(root)
+        except Exception:
+            continue
+
+    unique = []
+    for r in roots:
+        if not any(np.linalg.norm(r - u) < tol for u in unique):
+            unique.append(r)
+    return unique
+
+def plot_bifurcation():
+    """Plot equilibrium branches vs. k using the numerical finder."""
+    logging.info("Generating bifurcation diagram...")
+    k_vals = np.linspace(min(K_RANGE), max(K_RANGE), 100)
+    records = []
+    for k in tqdm(k_vals, desc="Bifurcation Analysis"):
+        for eq in find_equilibria_numerically(k, n_guesses=50):
+            eigs = np.linalg.eigvals(jac(eq, k))
+            stable = all(np.real(eigs) < 0)
+            records.append({'k': k, 'v1': eq[0], 'stable': stable})
+
+    df = pd.DataFrame(records)
+    plt.figure(figsize=(8,6))
+    plt.plot(df[df['stable']]['k'], df[df['stable']]['v1'], 'bo', markersize=3, label='Stable')
+    plt.plot(df[~df['stable']]['k'], df[~df['stable']]['v1'], 'ro', markersize=2, label='Unstable')
+    plt.xlabel('Coupling Strength k')
+    plt.ylabel('$V_1$ at equilibrium')
+    plt.title('Bifurcation Diagram')
+    plt.legend()
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.savefig(OUT_DIR / 'bifurcation_diagram.png')
+    plt.close()
+
+
+
+
 def euler_maruyama(k: float,
                    IS_fun, IR_fun,
                    sigma: float,
@@ -272,8 +320,11 @@ def animate_trial(k: float, sigma: float, amp: float,
     IS_set = rectangular_pulse(0.0, 2.0, amp)
     IR_set = rectangular_pulse(0.0, 2.0, -amp if amp > 0 else 0.0)
 
+    # Reduce simulation time for animation to generate fewer frames
+    animation_T = 5.0  # Simulate for 5 seconds for the animation (e.g., 501 frames if DT=0.01)
+                       # Original T_TOTAL is 20.0, leading to 2001 frames.
     path = euler_maruyama(k, IS_set, IR_set, sigma,
-                          v0=v_start, rng=rng, return_path=True)
+                          v0=v_start, T=animation_T, dt=DT, rng=rng, return_path=True)
 
     U_coords = np.linspace(-2.5, 2.5, GRID_N)
     V_coords = np.linspace(-2.5, 2.5, GRID_N)
@@ -310,7 +361,15 @@ def animate_trial(k: float, sigma: float, amp: float,
                                   init_func=init, blit=True, interval=40)
 
     if save_path is not None:
-        ani.save(save_path, writer ='pillow', fps=25)
+        total_frames = len(path)
+        logging.info(f"Starting animation save. Total frames: {total_frames}")
+        
+        def progress_callback(current_frame, total_frames_from_func):
+            # current_frame is 0-indexed
+            logging.info(f"Saving frame {current_frame + 1} of {total_frames_from_func}")
+
+        ani.save(save_path, writer='pillow', fps=25, progress_callback=progress_callback)
+        logging.info(f"Animation saved to {save_path}")
         plt.close(fig)
     else:
         plt.show()
@@ -618,7 +677,9 @@ def run_all(args):
             plot_phase(k_val)
         logging.info("Generating bistability vs k plot...")
         bistability_vs_k()
-        
+    if args.bifurcation:
+        plot_bifurcation()
+
     if args.cont:
         logging.info("Attempting PyCont continuation (requires PyDSTool)...")
         if HAVE_PYDSTOOL:
@@ -641,7 +702,8 @@ if __name__ == '__main__':
         mp.freeze_support()
         
     parser = argparse.ArgumentParser(description='Two‑cell SR‑latch pipeline')
-    parser.add_argument('--phase', action='store_true', help='Generate phase‑plane diagrams and bistability plot')
+    parser.add_argument('--phase', action='store_true', help='Generate phase‑plane diagrams and basic stability plot')
+    parser.add_argument('--bifurcation', action='store_true', help='Generate V1 vs k bifurcation diagram')
     parser.add_argument('--cont',  action='store_true', help='Run PyCont equilibrium continuation (if available)')
     parser.add_argument('--sweep', action='store_true', help='Run Monte‑Carlo parameter sweeps and generate heatmaps')
     parser.add_argument('--truth', action='store_true', help='Run deterministic truth‑table check')
@@ -654,6 +716,7 @@ if __name__ == '__main__':
         cli_args.phase = True
         cli_args.sweep = True
         cli_args.truth = True
+        cli_args.bifurcation = True
         # cli_args.cont = True # User wants to forget about PyCont
 
     # If no specific flag or --all is given, run a default set
@@ -662,6 +725,7 @@ if __name__ == '__main__':
         cli_args.phase = True
         cli_args.sweep = True
         cli_args.truth = True
+        cli_args.bifurcation = True
         # cli_args.cont = True # Default does not run cont
 
     run_all(cli_args)
