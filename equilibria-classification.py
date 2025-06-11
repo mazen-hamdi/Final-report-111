@@ -35,7 +35,7 @@ except ImportError:
 # ──────────────────────────────────────────────────────────────── global CONFIG —
 OUT_DIR          = Path("results"); OUT_DIR.mkdir(exist_ok=True)
 K_RANGE          = np.linspace(0.10, 1.50, 10) # Reduced for faster testing, adjust as needed
-SIGMA_RANGE      = np.linspace(0.0, 0.40, 9)
+SIGMA_RANGE      = np.linspace(-2, -0.5, 9)
 AMP_RANGE        = np.linspace(0.0, 2.0 , 9) # Reduced for faster testing
 DT, T_TOTAL      = 1e-2, 20.0 # Reduced T_TOTAL for switch_trial, ensure it's enough
 TRIALS_PER_TASK  = 50 # Reduced for faster testing
@@ -157,29 +157,49 @@ def find_equilibria_numerically(k: float, n_guesses: int = 100,
             unique.append(r)
     return unique
 
-def plot_bifurcation():
-    """Plot equilibrium branches vs. k using the numerical finder."""
-    logging.info("Generating bifurcation diagram...")
-    k_vals = np.linspace(min(K_RANGE), max(K_RANGE), 100)
-    records = []
-    for k in tqdm(k_vals, desc="Bifurcation Analysis"):
-        for eq in find_equilibria_numerically(k, n_guesses=50):
-            eigs = np.linalg.eigvals(jac(eq, k))
-            stable = all(np.real(eigs) < 0)
-            records.append({'k': k, 'v1': eq[0], 'stable': stable})
 
-    df = pd.DataFrame(records)
-    plt.figure(figsize=(8,6))
-    plt.plot(df[df['stable']]['k'], df[df['stable']]['v1'], 'bo', markersize=3, label='Stable')
-    plt.plot(df[~df['stable']]['k'], df[~df['stable']]['v1'], 'ro', markersize=2, label='Unstable')
-    plt.xlabel('Coupling Strength k')
-    plt.ylabel('$V_1$ at equilibrium')
+def plot_bifurcation():
+    """
+    Generates a bifurcation diagram showing equilibrium positions vs. k.
+    This is a more informative replacement for bistability_vs_k.
+    """
+    logging.info("Generating bifurcation diagram...")
+    k_values = np.linspace(0.1, 1.5, 100)
+    
+    # Store results: k, v1_value, stability
+    results = []
+
+    for k in tqdm(k_values, desc="Bifurcation Analysis"):
+        # Use our robust numerical finder
+        equilibria = find_equilibria_numerically(k, n_guesses=50) 
+        
+        for eq in equilibria:
+            # Classify stability by checking eigenvalues of the Jacobian
+            eigenvalues = np.linalg.eigvals(jac(eq, k))
+            # It's stable if all real parts of eigenvalues are negative
+            is_stable = all(np.real(eig) < 0 for eig in eigenvalues)
+            results.append({'k': k, 'v1': eq[0], 'stable': is_stable})
+
+    df = pd.DataFrame(results)
+    stable_points = df[df['stable'] == True]
+    unstable_points = df[df['stable'] == False]
+
+    plt.figure(figsize=(8, 6))
+    # Plot stable branches (solid) and unstable branches (dashed)
+    plt.plot(stable_points['k'], stable_points['v1'], 'b.', markersize=4, label='Stable Equilibria (Attractors)')
+    plt.plot(unstable_points['k'], unstable_points['v1'], 'r.', markersize=2, alpha=0.5, label='Unstable Equilibria (Saddles/Repellers)')
+    
+    plt.xlabel('Coupling Strength (k)')
+    plt.ylabel('Equilibrium value of $V_1$')
     plt.title('Bifurcation Diagram')
-    plt.legend()
     plt.grid(True, linestyle=':', alpha=0.7)
+    plt.legend()
     plt.savefig(OUT_DIR / 'bifurcation_diagram.png')
     plt.close()
 
+
+
+# ──────────────────────────────────────────────────────────────── SDE integrator —
 
 
 
@@ -676,70 +696,229 @@ def bistability_vs_k():
 
 # ───────────────────────────────────────────── truth‑table verification (σ=0) —
 def truth_table():
-    # This function might need adjustments based on the refined switch_trial logic
-    # and how "Set" and "Reset" pulses are defined and tested.
-    # For now, keeping its structure but noting it might need review.
     k_fixed = 0.5
-    amp_fixed = 1.0 # A representative amplitude for pulses
-    logging.info(f"Running truth table for k={k_fixed}, amp={amp_fixed}")
+    amp_fixed = 1.5 # A representative amplitude for pulses - CHANGED FROM 1.0
+    logging.info(f"Running truth table for k={k_fixed}, amp={amp_fixed}, sigma=0.0") # Added sigma to log
 
-    # Define states: Q=1 (v1 high, v2 low), Q=0 (v1 low, v2 high)
-    # Target for Q=1: e.g., (sqrt(1+k), -sqrt(1+k))
-    # Target for Q=0: e.g., (-sqrt(1+k), sqrt(1+k))
-    
-    # Helper to simulate and check state
+    # --- Dynamically prepare initial Q=0 state ---
+    logging.info("Preparing initial Q=0 state dynamically...") # Changed from print
+    initial_state_q0 = prepare_reset_state(k_fixed, amp_fixed, sigma=0.0)
+    logging.info(f"  ...prepared Q=0 state: {initial_state_q0}, Q=0-like: {initial_state_q0[0] < -0.1 and initial_state_q0[1] > 0.1}") # Changed from print
+
+    # --- Dynamically prepare initial Q=1 state (by "Set" pulsing the Q=0 state) ---
+    logging.info("Preparing initial Q=1 state dynamically (from prepared Q=0)...") # Added this log
+    IS_for_q1_prep = rectangular_pulse(0, 2, amp_fixed)
+    IR_for_q1_prep = rectangular_pulse(0, 2, -amp_fixed)
+    initial_state_q1 = euler_maruyama(k_fixed, IS_for_q1_prep, IR_for_q1_prep, 0.0, v0=initial_state_q0, T=T_TOTAL)
+    logging.info(f"  ...prepared Q=1 state: {initial_state_q1}, Q=1-like: {initial_state_q1[0] > 0.1 and initial_state_q1[1] < -0.1}") # Changed from print, used initial_state_q1
+
     def check_final_state(v_final, target_v1_pos=True, threshold=0.1):
-        if target_v1_pos: # Q=1 like state
+        if target_v1_pos: # Q=1 like state (V1 high, V2 low)
             return int(v_final[0] > threshold and v_final[1] < -threshold)
-        else: # Q=0 like state
+        else: # Q=0 like state (V1 low, V2 high)
             return int(v_final[0] < -threshold and v_final[1] > threshold)
 
-    # 1. Hold Q=0: Start at Q=0, no pulse, should remain Q=0
-    v_start_q0 = np.array([-np.sqrt(1+k_fixed), np.sqrt(1+k_fixed)]) if (1+k_fixed)>0 else np.array([0.0, 0.0])
-    v_hold_q0 = euler_maruyama(k_fixed, lambda t:0, lambda t:0, 0.0, v0=v_start_q0, T=T_TOTAL)
-    hold_q0_result = check_final_state(v_hold_q0, target_v1_pos=False) # Expect Q=0
+    # Test cases using the dynamically prepared initial_state_q0 and initial_state_q1
 
-    # 2. Set (from Q=0 to Q=1): Start at Q=0, Set pulse, should go to Q=1
+    # 1. Hold Q=0: Start at prepared Q=0, no pulse, should remain Q=0
+    logging.info("Test 1: Hold Q=0 (start from prepared Q=0, no pulse)")
+    # REMOVED: v_start_q0 = np.array([-np.sqrt(1+k_fixed), np.sqrt(1+k_fixed)]) if (1+k_fixed)>0 else np.array([0.0, 0.0])
+    v_final_hold_q0 = euler_maruyama(k_fixed, lambda t:0, lambda t:0, 0.0, v0=initial_state_q0, T=T_TOTAL)
+    hold_q0_result = check_final_state(v_final_hold_q0, target_v1_pos=False) # Expect Q=0
+
+    # 2. Set (from Q=0 to Q=1): Start at prepared Q=0, Set pulse, should go to Q=1
+    logging.info("Test 2: Set Q0->Q1 (start from prepared Q=0, Set pulse)")
     IS_set = rectangular_pulse(0, 2, amp_fixed)
-    IR_set = rectangular_pulse(0, 2, -amp_fixed) # Push V2 low
-    v_set_q1 = euler_maruyama(k_fixed, IS_set, IR_set, 0.0, v0=v_start_q0, T=T_TOTAL)
-    set_q1_result = check_final_state(v_set_q1, target_v1_pos=True) # Expect Q=1
+    IR_set = rectangular_pulse(0, 2, -amp_fixed) # Push V2 low for Set
+    v_final_set_q1 = euler_maruyama(k_fixed, IS_set, IR_set, 0.0, v0=initial_state_q0, T=T_TOTAL)
+    set_q1_result = check_final_state(v_final_set_q1, target_v1_pos=True) # Expect Q=1
 
-    # 3. Hold Q=1: Start at Q=1, no pulse, should remain Q=1
-    v_start_q1 = np.array([np.sqrt(1+k_fixed), -np.sqrt(1+k_fixed)]) if (1+k_fixed)>0 else np.array([0.0, 0.0])
-    v_hold_q1 = euler_maruyama(k_fixed, lambda t:0, lambda t:0, 0.0, v0=v_start_q1, T=T_TOTAL)
-    hold_q1_result = check_final_state(v_hold_q1, target_v1_pos=True) # Expect Q=1
+    # 3. Hold Q=1: Start at prepared Q=1, no pulse, should remain Q=1
+    logging.info("Test 3: Hold Q=1 (start from prepared Q=1, no pulse)")
+    # REMOVED: v_start_q1 = np.array([np.sqrt(1+k_fixed), -np.sqrt(1+k_fixed)]) if (1+k_fixed)>0 else np.array([0.0, 0.0])
+    v_final_hold_q1 = euler_maruyama(k_fixed, lambda t:0, lambda t:0, 0.0, v0=initial_state_q1, T=T_TOTAL)
+    hold_q1_result = check_final_state(v_final_hold_q1, target_v1_pos=True) # Expect Q=1
     
-    # 4. Reset (from Q=1 to Q=0): Start at Q=1, Reset pulse, should go to Q=0
-    # Reset pulse: IS low (or negative), IR high (or positive)
-    IS_reset = rectangular_pulse(0, 2, -amp_fixed) # Push V1 low
-    IR_reset = rectangular_pulse(0, 2, amp_fixed)  # Push V2 high
-    v_reset_q0 = euler_maruyama(k_fixed, IS_reset, IR_reset, 0.0, v0=v_start_q1, T=T_TOTAL)
-    reset_q0_result = check_final_state(v_reset_q0, target_v1_pos=False) # Expect Q=0
+    # 4. Reset (from Q=1 to Q=0): Start at prepared Q=1, Reset pulse, should go to Q=0
+    logging.info("Test 4: Reset Q1->Q0 (start from prepared Q=1, Reset pulse)")
+    IS_reset = rectangular_pulse(0, 2, -amp_fixed) # Push V1 low for Reset
+    IR_reset = rectangular_pulse(0, 2, amp_fixed)  # Push V2 high for Reset
+    v_final_reset_q0 = euler_maruyama(k_fixed, IS_reset, IR_reset, 0.0, v0=initial_state_q1, T=T_TOTAL)
+    reset_q0_result = check_final_state(v_final_reset_q0, target_v1_pos=False) # Expect Q=0
 
-    # 5. Invalid (Set and Reset simultaneously) - behavior might be undefined or go to a specific state
-    # Let's assume starting from Q=0
+    # 5. Invalid (Set and Reset simultaneously from Q=0)
+    logging.info("Test 5: Invalid S=R=1 (start from prepared Q=0, S=1 R=1 pulse)")
     IS_invalid = rectangular_pulse(0, 2, amp_fixed)
-    IR_invalid = rectangular_pulse(0, 2, amp_fixed) # Both positive pulses
-    v_invalid = euler_maruyama(k_fixed, IS_invalid, IR_invalid, 0.0, v0=v_start_q0, T=T_TOTAL)
-    # How to classify invalid? Let's say if it's not Q=0 and not Q=1, or if it's (0,0)
-    is_q0_invalid = check_final_state(v_invalid, target_v1_pos=False)
-    is_q1_invalid = check_final_state(v_invalid, target_v1_pos=True)
-    invalid_result = 1 if not is_q0_invalid and not is_q1_invalid else 0 # Or some other logic
+    IR_invalid = rectangular_pulse(0, 2, amp_fixed) # Both positive pulses (S=1, R=1)
+    v_final_invalid_from_q0 = euler_maruyama(k_fixed, IS_invalid, IR_invalid, 0.0, v0=initial_state_q0, T=T_TOTAL)
+    logging.info(f"  ...v_final for S=R=1 case: {v_final_invalid_from_q0}") # ADDED LOG
+    is_q0_after_invalid = check_final_state(v_final_invalid_from_q0, target_v1_pos=False)
+    is_q1_after_invalid = check_final_state(v_final_invalid_from_q0, target_v1_pos=True)
+    # Result is 1 if it's neither Q0 nor Q1 (an "other" state)
+    invalid_from_q0_result = 1 if not is_q0_after_invalid and not is_q1_after_invalid else 0
 
     res_data = {
-        'Hold_Q0_stays_Q0': hold_q0_result, # Expected 1
-        'Set_Q0_to_Q1': set_q1_result,       # Expected 1
-        'Hold_Q1_stays_Q1': hold_q1_result, # Expected 1
-        'Reset_Q1_to_Q0': reset_q0_result,   # Expected 1
-        'Invalid_input_behavior': invalid_result # Behavior specific
+        'Hold_Q0_stays_Q0': hold_q0_result,        # Expected 1
+        'Set_Q0_to_Q1': set_q1_result,            # Expected 1
+        'Hold_Q1_stays_Q1': hold_q1_result,        # Expected 1
+        'Reset_Q1_to_Q0': reset_q0_result,          # Expected 1
+        'Invalid_S1R1_from_Q0_not_Q0_not_Q1': invalid_from_q0_result # Expected 1 if it goes to a non-Q0/Q1 state
     }
     res_series = pd.Series(res_data)
     res_series.to_csv(OUT_DIR / 'truth_table_results.csv', header=False)
-    logging.info(f"Truth table results:\n{res_series}")
+    logging.info(f"Truth table results (1 indicates success/expected outcome):\n{res_series}") # Clarified log message
 
+# ─────────────────────────────────── deterministic (ideal world) analysis ─
+def _run_deterministic_switch_test(k: float, amp: float, duration: float) -> bool:
+    """
+    Helper function: performs a single, noise-free switch attempt.
 
+    Returns:
+        True if the switch from Q=0 to Q=1 was successful, False otherwise.
+    """
+    # 1. Prepare the initial Q=0 state robustly and deterministically
+    v_start_q0 = prepare_reset_state(k, amp=1.5, sigma=0.0)
+
+    # 2. Define the "Set" pulse with the given parameters
+    IS_set = rectangular_pulse(t0=0.0, t1=duration, amp=amp)
+    IR_set = rectangular_pulse(t0=0.0, t1=duration, amp=-amp) # Opposing pulse
+
+    # 3. Simulate for the pulse duration plus settling time
+    settling_time = 10.0
+    total_time = duration + settling_time
+    v_final = euler_maruyama(k, IS_set, IR_set, sigma=0.0, v0=v_start_q0, T=total_time)
+
+    # 4. Check if the final state is a successful Q=1 state
+    # A robust check is to see if v1 is positive and v2 is negative.
+    switched_successfully = (v_final[0] > 0.1 and v_final[1] < -0.1)
+    return switched_successfully
+
+def analyze_deterministic_switching():
+    """
+    Analyzes the latch's performance in a noise-free (sigma=0) environment.
+    Generates plots for:
+      - Minimum switching amplitude vs. coupling (k)
+      - Minimum switching duration vs. coupling (k)
+    """
+    logging.info("--- Starting Ideal World Analysis (sigma=0) ---")
+
+    k_to_test = np.linspace(0.2, 1.4, 8)
+    amps_to_test = np.linspace(0.1, 2.0, 40)
+    durations_to_test = np.linspace(0.1, 5.0, 40)
+
+    results = []
+
+    # --- Experiment 1: Find minimum amplitude for a fixed duration ---
+    fixed_duration = 2.0
+    logging.info(f"Finding minimum switching amplitude (pulse duration = {fixed_duration}s)...")
+    for k in tqdm(k_to_test, desc="Testing Amplitudes"):
+        min_amp = np.nan
+        for amp in amps_to_test:
+            if _run_deterministic_switch_test(k, amp, fixed_duration):
+                min_amp = amp
+                break # Found the first successful amplitude, so we can stop
+        results.append({'k': k, 'min_amp': min_amp})
+
+    # --- Experiment 2: Find minimum duration for a fixed amplitude ---
+    fixed_amplitude = 1.5
+    logging.info(f"Finding minimum switching duration (pulse amplitude = {fixed_amplitude})...")
+    for i, k in enumerate(tqdm(k_to_test, desc="Testing Durations")):
+        min_duration = np.nan
+        for duration in durations_to_test:
+            if _run_deterministic_switch_test(k, fixed_amplitude, duration):
+                min_duration = duration
+                break # Found the first successful duration
+        results[i]['min_duration'] = min_duration
+
+    # --- Plotting the results ---
+    df = pd.DataFrame(results)
+    
+    # Plot 1: Minimum Amplitude vs. k
+    plt.figure(figsize=(8, 6))
+    plt.plot(df['k'], df['min_amp'], 'o-', color='crimson')
+    plt.xlabel('Coupling Strength (k)')
+    plt.ylabel('Minimum Switching Amplitude (amp)')
+    plt.title(f'Ideal World: Latch Sensitivity (Pulse Duration = {fixed_duration}s)')
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.savefig(OUT_DIR / 'deterministic_min_amplitude.png')
+    plt.close()
+
+    # Plot 2: Minimum Duration vs. k
+    plt.figure(figsize=(8, 6))
+    plt.plot(df['k'], df['min_duration'], 'o-', color='darkcyan')
+    plt.xlabel('Coupling Strength (k)')
+    plt.ylabel('Minimum Switching Duration (s)')
+    plt.title(f'Ideal World: Latch Speed (Pulse Amplitude = {fixed_amplitude})')
+    plt.grid(True, linestyle=':', alpha=0.7)
+    plt.savefig(OUT_DIR / 'deterministic_min_duration.png')
+    plt.close()
+    
+    logging.info(f"Ideal world analysis complete. Plots saved to {OUT_DIR}/")
 # ─────────────────────────────────────────────────────────────── CLI + main —──
+def dwell_time_trial(k: float, sigma: float, rng: np.random.Generator | None = None) -> float:
+    """
+    Measures the time it takes for noise to flip a stored state from Q=1 to Q=0.
+    Returns the time of the flip. If it doesn't flip, returns T_MAX.
+    """
+    if rng is None:
+        rng = globals().get("rng", np.random.default_rng())
+
+    T_MAX = 500.0  # Use a much longer simulation time for this test
+    dt = DT
+
+    # 1. Prepare the system in the Q=1 state deterministically
+    q0_state = prepare_reset_state(k, amp=1.5, sigma=0.0) # Start from Q=0
+    IS_set = rectangular_pulse(0, 2, 1.5)
+    IR_set = rectangular_pulse(0, 2, -1.5)
+    v = euler_maruyama(k, IS_set, IR_set, 0.0, v0=q0_state, T=10.0)
+
+    # 2. Now, simulate with NO input pulse, only noise, and wait for a flip
+    sdt = math.sqrt(dt)
+    t = 0.0
+    N = int(T_MAX / dt)
+    for i in range(N):
+        # Check if the state has flipped to Q=0 (v1 is low)
+        if v[0] < 0.0:
+            return t # Return the time of the flip
+        
+        # Evolve the system for one time step
+        v += rhs(v, k, 0.0, 0.0) * dt + sigma * sdt * rng.normal(size=2)
+        t += dt
+        
+    return T_MAX # Return max time if it never flipped
+
+def sweep_dwell_time():
+    """
+    Runs Monte Carlo simulation to measure memory dwell time vs. k and sigma.
+    """
+    logging.info("Running Monte Carlo sweep for dwell time...")
+    # Use fewer k values and more sigma values for this sweep
+    k_dwell_range = [0.2, 0.5, 0.8, 1.1]
+    sigma_dwell_range = np.logspace(-2, -0.7, 10) # 0.01 to ~0.2
+    
+    results = []
+    for k in k_dwell_range:
+        avg_dwell_times = []
+        for sigma in tqdm(sigma_dwell_range, desc=f"Dwell Time (k={k:.2f})"):
+            # Run multiple trials for each data point to get an average
+            trials = [dwell_time_trial(k, sigma) for _ in range(TRIALS_PER_TASK)]
+            avg_dwell_times.append(np.mean(trials))
+        results.append({'k': k, 'sigma': sigma_dwell_range, 'avg_dwell_time': avg_dwell_times})
+
+    plt.figure(figsize=(8, 6))
+    for res in results:
+        plt.plot(res['sigma'], res['avg_dwell_time'], 'o-', label=f'k = {res["k"]:.2f}')
+
+    plt.xlabel('Noise Intensity (sigma)')
+    plt.ylabel('Average Dwell Time (s)')
+    plt.title('Memory Stability: Time Before Noise-Induced Flip')
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.grid(True, which="both", ls="--", alpha=0.6)
+    plt.legend()
+    plt.savefig(OUT_DIR / 'dwell_time_vs_sigma.png')
+    plt.close()
+
 def run_all(args):
     if args.phase:
         logging.info("Generating phase plane diagrams...")
@@ -749,9 +928,10 @@ def run_all(args):
             plot_phase_ideal(k_val)  # Ideal case for comparison
         logging.info("Generating bistability vs k plot...")
         bistability_vs_k()
+        
     if args.bifurcation:
         plot_bifurcation()
-
+       
     if args.cont:
         logging.info("Attempting PyCont continuation (requires PyDSTool)...")
         if HAVE_PYDSTOOL:
@@ -761,11 +941,14 @@ def run_all(args):
 
     if args.sweep:
         logging.info("Running Monte Carlo sweep for heatmaps...")
-        sweep() # This function now also handles plotting the heatmaps
-        
+        sweep() 
+    if args.dwell: # CHANGED from cli_args.dwell
+        sweep_dwell_time()    
     if args.truth:
         logging.info("Running truth table verification...")
         truth_table()
+    if args.deterministic: # CHANGED from cli_args.deterministic
+        analyze_deterministic_switching()
         
     logging.info(f'All requested outputs saved in {OUT_DIR}/')
 
@@ -776,28 +959,38 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Two‑cell SR‑latch pipeline')
     parser.add_argument('--phase', action='store_true', help='Generate phase‑plane diagrams and basic stability plot')
     parser.add_argument('--bifurcation', action='store_true', help='Generate V1 vs k bifurcation diagram')
+    # REMOVED: parser.add_argument('--switch', action='store_true', help='Run MC sweep for switching probability')
     parser.add_argument('--cont',  action='store_true', help='Run PyCont equilibrium continuation (if available)')
-    parser.add_argument('--sweep', action='store_true', help='Run Monte‑Carlo parameter sweeps and generate heatmaps')
+    parser.add_argument('--sweep', action='store_true', help='Run Monte‑Carlo parameter sweeps and generate heatmaps (for switching probability)') # CLARIFIED help
     parser.add_argument('--truth', action='store_true', help='Run deterministic truth‑table check')
-    parser.add_argument('--all', action='store_true', help='Run all analysis parts (phase, sweep, truth)')
+    parser.add_argument('--deterministic', action='store_true', help='Run ideal world (sigma=0) performance analysis')
+    parser.add_argument('--dwell', action='store_true', help='Run MC sweep for memory dwell time')
+    parser.add_argument('--all', action='store_true', help='Run all analysis parts (excluding PyCont)') # CLARIFIED help
     
     cli_args = parser.parse_args()
 
     # If --all is specified, set individual flags
     if cli_args.all:
         cli_args.phase = True
+        cli_args.bifurcation = True
+        # cli_args.cont = True # User wants to forget about PyCont, so we don't enable it with --all
         cli_args.sweep = True
         cli_args.truth = True
-        cli_args.bifurcation = True
-        # cli_args.cont = True # User wants to forget about PyCont
+        cli_args.deterministic = True 
+        cli_args.dwell = True
+        # cli_args.switch was removed
 
-    # If no specific flag or --all is given, run a default set
-    if not any([cli_args.phase, cli_args.cont, cli_args.sweep, cli_args.truth]):
-        logging.info("No specific analysis selected, running default (phase, sweep, truth). Use --help for options.")
-        cli_args.phase = True
-        cli_args.sweep = True
-        cli_args.truth = True
-        cli_args.bifurcation = True
-        # cli_args.cont = True # Default does not run cont
+    # Check if any specific task has been selected
+    any_task_selected = any([
+        cli_args.phase, cli_args.bifurcation, cli_args.cont, cli_args.sweep,
+        cli_args.truth, cli_args.deterministic, cli_args.dwell
+    ])
+
+    # If no specific analysis flags are set (and --all was not used to set them), 
+    # print help and exit.
+    if not any_task_selected:
+        logging.info("No specific analysis selected. Use --help for options. To run all non-PyCont analyses, use --all.")
+        parser.print_help()
+        sys.exit()
 
     run_all(cli_args)
