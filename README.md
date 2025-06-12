@@ -129,4 +129,6 @@ This framework provides insights relevant to:
 - **Mathematical Biology**: Stochastic effects in biological switches
 - **Dynamical Systems**: General theory of coupled nonlinear oscillators
 
+# citation
+Use of chatgpt in the code
 
