@@ -1,0 +1,5 @@
+k_range,0.10 - 1.80
+amp_range_tested,0.05 - 3.00
+duration_range_tested,0.05 - 8.00
+total_tests,150
+successful_tests,112

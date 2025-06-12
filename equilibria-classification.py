@@ -1729,30 +1729,53 @@ def plot_basins_of_attraction(k: float, resolution: int = 200, save_plot: bool =
     
     logging.info("═" * 60)
 
-# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-# ─────────────────────────────────────────────────────────────── CLI + main —──
+# ═══════════════════════════════════════════════════════════════════════════════
+# DWELL TIME ANALYSIS (MEMORY STABILITY UNDER NOISE)
+# ═══════════════════════════════════════════════════════════════════════════════
+
 def dwell_time_trial(k: float, sigma: float, rng: np.random.Generator | None = None) -> float:
     """
-    Measures the first-passage time for noise to flip a stored state from Q=1 to Q=0.
+    Measure first-passage time for noise-induced state transitions (dwell time analysis).
     
-    This is a rigorous implementation of the dwell time measurement that:
-    1. Prepares a stable Q=1 state deterministically
-    2. Evolves the system under pure noise (no external inputs)
-    3. Returns the time when the state first crosses into the Q=0 basin
+    This function provides a rigorous measurement of memory stability by analyzing
+    how long stored information persists under stochastic perturbations.
     
-    Parameters
-    ----------
+    The dwell time τ is defined as the time for the system to spontaneously flip
+    from a prepared Q=1 state to the Q=0 basin under pure noise dynamics.
+    
+    Methodology:
+    -----------
+    1. Deterministically prepare stable Q=1 state (V₁ > 0, V₂ < 0)
+    2. Evolve system under noise only (no external inputs)
+    3. Measure time until first crossing into Q=0 basin (V₁ < -0.05)
+    4. Return flip time or T_MAX if no transition occurs
+    
+    Parameters:
+    -----------
     k : float
-        Coupling strength
-    sigma : float
-        Noise intensity
+        Coupling strength parameter
+    sigma : float  
+        Noise intensity (affects transition rate via Kramers theory)
     rng : np.random.Generator, optional
-        Random number generator for reproducibility
+        Random number generator for reproducible measurements
         
-    Returns
-    -------
+    Returns:
+    --------
     float
-        Time of first flip to Q=0, or T_MAX if no flip occurs
+        Dwell time (first-passage time) in seconds, or T_MAX if no flip occurs
+        
+    Physical Interpretation:
+    -----------------------
+    - Larger dwell times indicate more stable memory storage
+    - Dwell time typically decreases exponentially with noise intensity
+    - System parameters (k) affect the energy barrier height between states
+    - Related to Kramers escape time theory for noise-driven transitions
+    
+    Notes:
+    ------
+    Uses adaptive time stepping for numerical stability at high noise levels.
+    The 500-second maximum simulation time balances computational cost with
+    the ability to measure rare transitions in low-noise regimes.
     """
     if rng is None:
         rng = globals().get("rng", np.random.default_rng())
@@ -2101,7 +2124,40 @@ def create_custom_animation(k: float, sigma: float, amp: float,
     logging.info(f"Animation saved: {save_path}")
     plt.close(fig)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND-LINE INTERFACE AND MAIN EXECUTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
 def run_all(args):
+    """
+    Main execution function that coordinates all analysis components.
+    
+    This function serves as the central dispatcher that executes the requested
+    analyses based on command-line arguments. It provides a comprehensive
+    pipeline for studying the neural latch system across multiple dimensions:
+    
+    Analysis Components:
+    -------------------
+    1. Phase plane analysis: Equilibria, nullclines, and flow visualization
+    2. Bifurcation analysis: Parameter-dependent stability changes
+    3. Monte Carlo simulations: Switching probability under noise
+    4. Truth table verification: Digital logic functionality testing
+    5. Basin of attraction: Multistability and initial condition dependence
+    6. Dwell time analysis: Memory stability under noise
+    7. Animation generation: Dynamic trajectory visualization
+    
+    Parameters:
+    -----------
+    args : argparse.Namespace
+        Parsed command-line arguments specifying which analyses to run
+        
+    Execution Strategy:
+    ------------------
+    - Analyses are executed in logical order with appropriate parameter ranges
+    - Progress is logged for long-running computations
+    - Results are saved in standardized formats for further analysis
+    - Error handling ensures partial completion if individual analyses fail
+    """
     if args.phase:
         logging.info("Generating phase plane diagrams...")
         # Expanded and varied k values for comprehensive phase plane analysis
@@ -2163,46 +2219,97 @@ def run_all(args):
         
     logging.info(f'All requested outputs saved in {OUT_DIR}/')
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="SR Latch Analysis Pipeline: End-to-end numerical study of the two-cell bioelectric SR-latch.")
-    
-    parser.add_argument("--all", action="store_true", help="Run all major analyses (phase, bifurcation, sweep, dwell, truth, deterministic). Excludes animation and continuation by default.")
-    parser.add_argument("--phase", action="store_true", help="Generate phase plane diagrams and bistability vs k plot.")
-    parser.add_argument("--bifurcation", action="store_true", help="Generate bifurcation diagram using numerical finder.")
-    parser.add_argument("--cont", action="store_true", help="Run PyCont continuation (requires PyDSTool).")
-    parser.add_argument("--sweep", action="store_true", help="Run Monte Carlo sweep for P(switch) heatmaps.")
-    parser.add_argument("--dwell", action="store_true", help="Run Monte Carlo sweep for dwell time analysis.")
-    parser.add_argument("--truth", action="store_true", help="Run truth table verification.")
-    parser.add_argument("--deterministic", action="store_true", help="Run deterministic switching analysis (ideal world performance).")
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN EXECUTION AND COMMAND-LINE ARGUMENT PARSING
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    parser.add_argument("--animate", action="store_true", help="Generate and save a trial animation.")
-    parser.add_argument("--k_animate", type=float, default=0.5, help="Coupling strength (k) for animation. Default: 0.5")
-    parser.add_argument("--sigma_animate", type=float, default=0.1, help="Noise intensity (sigma) for animation. Default: 0.1")
-    parser.add_argument("--amp_animate", type=float, default=1.0, help="Pulse amplitude (amp) for animation. Default: 1.0")
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description="Coupled Neural Latch Analysis Pipeline",
+        epilog="""
+        This script provides a comprehensive analysis suite for studying the dynamics 
+        of a two-cell bioelectric SR-latch system. The system exhibits rich multistable 
+        behavior, noise-induced transitions, and complex bifurcation structure.
+        
+        Example usage:
+          python equilibria-classification.py --all           # Run complete analysis
+          python equilibria-classification.py --phase --bifurcation  # Phase planes + bifurcations
+          python equilibria-classification.py --sweep --truth # Monte Carlo + logic verification
+          python equilibria-classification.py --basins       # Basin of attraction analysis
+          python equilibria-classification.py --animate --k_animate 0.7 --sigma_animate 0.2
+        
+        For questions or issues, consult the README.md file.
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     
-    parser.add_argument("--animate_all", action="store_true", help="Generate comprehensive animations with different starting points, amplitudes, and noise levels for all k values.")
-    parser.add_argument("--animate_subset", action="store_true", help="Generate a smaller subset of animations for testing (faster execution).")
-    parser.add_argument("--basins", action="store_true", help="Generate basin of attraction analysis for multiple k values.")
+    # Core analysis options
+    parser.add_argument("--all", action="store_true", 
+                       help="Run all major analyses (phase, bifurcation, sweep, dwell, truth, deterministic). Excludes animation and continuation by default.")
+    
+    parser.add_argument("--phase", action="store_true", 
+                       help="Generate phase plane diagrams and bistability vs k plot.")
+    
+    parser.add_argument("--bifurcation", action="store_true", 
+                       help="Generate bifurcation diagram using numerical finder.")
+    
+    parser.add_argument("--cont", action="store_true", 
+                       help="Run PyCont continuation (requires PyDSTool).")
+    
+    parser.add_argument("--sweep", action="store_true", 
+                       help="Run Monte Carlo sweep for P(switch) heatmaps.")
+    
+    parser.add_argument("--dwell", action="store_true", 
+                       help="Run Monte Carlo sweep for dwell time analysis.")
+    
+    parser.add_argument("--truth", action="store_true", 
+                       help="Run truth table verification.")
+    
+    parser.add_argument("--deterministic", action="store_true", 
+                       help="Run deterministic switching analysis (ideal world performance).")
+
+    # Animation and visualization options
+    parser.add_argument("--animate", action="store_true", 
+                       help="Generate and save a trial animation.")
+    
+    parser.add_argument("--k_animate", type=float, default=0.5, 
+                       help="Coupling strength (k) for animation. Default: 0.5")
+    
+    parser.add_argument("--sigma_animate", type=float, default=0.1, 
+                       help="Noise intensity (sigma) for animation. Default: 0.1")
+    
+    parser.add_argument("--amp_animate", type=float, default=1.0, 
+                       help="Pulse amplitude (amp) for animation. Default: 1.0")
+    
+    parser.add_argument("--animate_all", action="store_true", 
+                       help="Generate comprehensive animations with different starting points, amplitudes, and noise levels for all k values.")
+    
+    parser.add_argument("--animate_subset", action="store_true", 
+                       help="Generate a smaller subset of animations for testing (faster execution).")
+    
+    parser.add_argument("--basins", action="store_true", 
+                       help="Generate basin of attraction analysis for multiple k values.")
 
     args = parser.parse_args()
 
+    # Handle --all flag by enabling major analysis components
     if args.all:
         args.phase = True
         args.bifurcation = True
         # args.cont = False  # PyCont can be slow and has external deps, keep optional
-        args.sweep = True
+        args.sweep = False  # MC sweep is too computationally expensive, keep optional
         args.dwell = True
         args.truth = True
         args.deterministic = True
         # Note: args.animate is not automatically enabled by --all
 
-    # Check if any action is requested. If not, print help.
-    action_requested = any(getattr(args, arg.dest) for arg in parser._actions if isinstance(arg, argparse._StoreTrueAction) and arg.dest not in ['help'])
+    # Determine if any action was requested
+    action_requested = any(getattr(args, arg.dest) for arg in parser._actions 
+                          if isinstance(arg, argparse._StoreTrueAction) and arg.dest not in ['help'])
 
-
-    if not action_requested :
-        # Special case: if only 'python script.py' is run, or only default animation args are implicitly set.
-        # Check if any boolean flag is True.
+    # If no action specified, show help and exit
+    if not action_requested:
+        # Check if any boolean flag is True
         is_any_action_explicitly_true = False
         for arg_name, arg_val in vars(args).items():
             action = next((act for act in parser._actions if act.dest == arg_name), None)
@@ -2211,7 +2318,16 @@ if __name__ == '__main__':
                 break
         
         if not is_any_action_explicitly_true:
-             parser.print_help()
-             sys.exit(0)
+            parser.print_help()
+            sys.exit(0)
+    
+    # Execute the requested analyses
+    logging.info("═" * 80)
+    logging.info("COUPLED NEURAL LATCH ANALYSIS PIPELINE")
+    logging.info("═" * 80)
+    logging.info(f"Output directory: {OUT_DIR}")
+    logging.info(f"Random seed: {SEED}")
+    logging.info(f"CPU cores available: {CPU_COUNT}")
+    logging.info("─" * 80)
     
     run_all(args)
