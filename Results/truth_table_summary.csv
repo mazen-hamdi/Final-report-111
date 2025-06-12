@@ -1,0 +1,4 @@
+Overall_Success_Rate,0.61
+Perfect_Operations,3
+Total_Tests,20
+Best_k_amp_combo,"{'k': 0.3, 'amp': 1.5}"
